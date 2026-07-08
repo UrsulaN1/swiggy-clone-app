@@ -61,7 +61,7 @@ jobs:
       - name: AWS Login via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::<YOUR_AWS_ACCOUNT_ID>:role/GitHubActions-EKS-Deploy-Role
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActions-EKS-Deploy-Role
           aws-region: us-east-1
 
       - name: Get EKS Credentials
