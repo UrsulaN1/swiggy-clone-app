@@ -391,7 +391,21 @@ sudo mv /tmp/eksctl /bin
 eksctl version
 ```
 
-### STEP 4: Setup Kubernetes using eksctl
+### STEP 4: Create IAM Role for EKS
+
+- Craete a Role with AWS Service as trusted entity
+- Select EC2 from the dropdown (or common use cases), then click Next
+- Add permissions: In the search box, type ***AdministratorAccess***. Check the box next to it in the list. Click Next.
+- Name and review: Name the role something easy to remember, like ***EC2-Admin-Role-For-EKS***.
+- Attach the IAM Role to your EC2 instance
+
+Give about 10 seconds for AWS to propagate the permissions, then verify it works by checking your identity:un the following command:
+
+```bash
+aws sts get-caller-identity
+```
+
+### STEP 5: Setup Kubernetes Cluster using eksctl
 
 Run the cluster creation command. Note: This process typically takes 15 to 20 minutes to complete.
 
@@ -402,7 +416,7 @@ eksctl create cluster --name swiggy-clone-app \
     --nodes 2
 ```
 
-### STEP 5: Map GitHub OIDC Role to Kubernetes RBAC
+### STEP 6: Map GitHub OIDC Role to Kubernetes RBAC
 
 ```bash
 eksctl create iamidentitymapping \
@@ -413,7 +427,7 @@ eksctl create iamidentitymapping \
     --username github-actions
 ```
 
-### STEP 6: Verify Cluster Configuration
+### STEP 7: Verify Cluster Configuration
 
 ```bash
 # Update local kubeconfig context to check access
