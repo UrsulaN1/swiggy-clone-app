@@ -356,30 +356,36 @@ git push -u origin main
 
 ## PHASE 3: CREATE EKS CLUSTER
 
-### STEP 1: install kubectl on ec2
+### STEP 1: install kubectl on EC2
 
 ```bash
 sudo apt update
-sudo apt install curl
-curl -LO https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl
+sudo apt install -y curl
+curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
 sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
 kubectl version --client
 ```
 
-### STEP 2: Install AWS CLI
+### STEP 2: Install AWS CLI and Clone Repo
 
 ```bash
+# Download and install AWS CLI v2
 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-sudo apt install unzip
+sudo apt install -y unzip
 unzip awscliv2.zip
 sudo ./aws/install
 aws --version
+
+# Configure global git parameters and clone repository
+git config --global user.name "Your.Name"
+git config --global user.email "your.email@gmail.com"
+git clone https://github.com/UrsulaN1/swiggy-clone-app.git
 ```
 
-### STEP 3: Installing  eksctl
+### STEP 3: Install  eksctl
 
 ```bash
- curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
+curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
 cd /tmp
 sudo mv /tmp/eksctl /bin
 eksctl version
@@ -387,42 +393,79 @@ eksctl version
 
 ### STEP 4: Setup Kubernetes using eksctl
 
+Run the cluster creation command. Note: This process typically takes 15 to 20 minutes to complete.
+
 ```bash
-eksctl create cluster --name my-cluster \
+eksctl create cluster --name swiggy-clone-app \
     --region us-east-1 \
-    --node-type t2.small \
-    --nodes 3 \
+    --node-type t2.medium \
+    --nodes 2
 ```
 
-### STEP 5: Verify Cluster with below command
+### STEP 5: Map GitHub OIDC Role to Kubernetes RBAC
 
 ```bash
+eksctl create iamidentitymapping \
+    --cluster swiggy-clone-app \
+    --region us-east-1 \
+    --arn arn:aws:iam::${AWS_ACCOUNT_ID}:role/GitHubActions-EKS-Deploy-Role \
+    --group system:masters \
+    --username github-actions
+```
+
+### STEP 6: Verify Cluster Configuration
+
+```bash
+# Update local kubeconfig context to check access
+aws eks update-kubeconfig --region us-east-1 --name swiggy-clone-app
+
+# Verify control plane and node accessibility
 kubectl get nodes
 kubectl get all
 ```
 
-[D] Verify CICD Pipeline through gitbash
-
-```bash
-git config --global user.name "Your.Name"
-git config --global user.email "your.email@gmail.com"
-git clone https://github.com/UrsulaN1/swiggy-app.git
-git add .
-git commit -m "Changed Banner"
-git push -u origin main  //after giving this command it may ask you to provide your github credentials
-```
-
 ## Cleanup
 
-```bash
-kubectl get all    ///It will show all the deployment & services.
-kubectl delete deployment.apps/swiggy-app
-kubectl delete service/swiggy-app
-eksctl delete cluster my-cluster --region us-east-1
+### STEP 1: Delete Kubernetes Resources
 
+Before destroying the cluster, cleanly remove the deployed application and services.
+
+```bash
+# View all active deployments and services
+kubectl get all
+
+# Delete the application deployment and service
+# Note: Ensure the name matches what is defined in your deployment-and-service.yml
+kubectl delete deployment swiggy-app
+kubectl delete service swiggy-app
+```
+
+### STEP 2: Delete the EKS Cluster
+
+Teardown the entire infrastructure built by eksctl. This will delete the CloudFormation stacks, worker nodes, and the control plane. (This process takes about 15 minutes).
+
+```bash
+eksctl delete cluster --name swiggy-clone-app --region us-east-1
+```
+
+### STEP 3: Clean Up Local Docker Containers (EC2/Local Runner)
+
+```bash
+# List all containers (running and stopped)
 docker ps -a
+
+# Stop and remove specific containers (replace 'xxx' with Container ID or Name)
 docker stop xxx
 docker rm xxx
 
-terraform destroy
+# Optional: Fast way to purge all unused containers, networks, and images
+docker system prune -a --volumes -f
+```
+
+### STEP 4: Destroy Terraform Resources
+
+If you spun up any underlying infrastructure components (like management VMs or databases) using Terraform, destroy them last.
+
+```Bash
+terraform destroy --auto-approve
 ```

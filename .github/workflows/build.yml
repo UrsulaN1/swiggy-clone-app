@@ -66,7 +66,7 @@ jobs:
 
       - name: Get EKS Credentials
         run: |
-          aws eks update-kubeconfig --region us-east-1 --name swiggy-clone-app
+          aws eks --region us-east-1 update-kubeconfig  --name swiggy-clone-app
 
       - name: Set up kubectl
         uses: azure/setup-kubectl@v4
