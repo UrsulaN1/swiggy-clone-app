@@ -418,13 +418,26 @@ eksctl create cluster --name swiggy-clone-app \
 
 ### STEP 6: Map GitHub OIDC Role to Kubernetes RBAC
 
+#### 1. Register your GitHub role with the EKS cluster
+
+(replace 123456789012 with your actual 12-digit AWS account number)
+
 ```bash
-eksctl create iamidentitymapping \
-    --cluster swiggy-clone-app \
-    --region us-east-1 \
-    --arn arn:aws:iam::${AWS_ACCOUNT_ID}:role/GitHubActions-EKS-Deploy-Role \
-    --group system:masters \
-    --username github-actions
+aws eks create-access-entry \
+    --cluster-name swiggy-clone-app \
+    --principal-arn arn:aws:iam::123456789012:role/GitHubActions-EKS-Deploy-Role \
+    --region us-east-1
+```
+
+#### 2. Grant that entry full Cluster Admin permissions
+
+```bash
+aws eks associate-access-policy \
+    --cluster-name swiggy-clone-app \
+    --principal-arn arn:aws:iam::123456789012:role/GitHubActions-EKS-Deploy-Role \
+    --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy \
+    --access-scope type=cluster \
+    --region us-east-1
 ```
 
 ### STEP 7: Verify Cluster Configuration
