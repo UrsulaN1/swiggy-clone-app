@@ -451,7 +451,39 @@ kubectl get nodes
 kubectl get all
 ```
 
-## Cleanup
+## PHASE 4: ACCESS APPLICATION ONCE DEPLOYED
+
+### What happens when you apply this manifest
+
+#### <u> 1. Deployment Creates Pods</u>
+
+It will spin up 2 replicas (Pods) running your Docker image ursulan1/swiggy. Inside those pods, your ***Node.js application*** is listening on port ***3000***.
+
+#### <u> 2. Service Provisions an AWS Load Balancer</u>
+
+Since the service type is set to LoadBalancer, AWS EKS will talk directly to your AWS account and provision a physical Classic Load Balancer (ELB) or Network Load Balancer (NLB) automatically.
+
+#### <u> 3. Traffic Routing</u>
+
+The AWS Load Balancer will listen for public traffic on standard web port 80 and forward it internally to your application pods on port 3000.
+
+### How to access your application once deployed
+
+After your GitHub Actions pipeline successfully runs
+```kubectl apply -f deployment-and-service.yml```, run this command below on your EC2 instance (or wait for the pipeline to finish) to get your public app URL:
+
+```Bash
+kubectl get svc swiggy-clone-app
+```
+
+Look at the ```EXTERNAL-IP``` column in the output. It will contain a long AWS domain name that looks something like this:
+```a73xxxxxxxxx-123456789.us-east-1.elb.amazonaws.com```
+
+Copy that URL, paste it into your web browser, and your live Swiggy Clone application should load up instantly!
+
+(Note: It can take 2–3 minutes for the AWS Load Balancer to finish provisioning and pass its health checks once the URL appears).
+
+## CLEANUP
 
 ### STEP 1: Delete Kubernetes Resources
 
@@ -463,8 +495,8 @@ kubectl get all
 
 # Delete the application deployment and service
 # Note: Ensure the name matches what is defined in your deployment-and-service.yml
-kubectl delete deployment swiggy-app
-kubectl delete service swiggy-app
+kubectl delete deployment swiggy-clone-app
+kubectl delete service swiggy-clone-app
 ```
 
 ### STEP 2: Delete the EKS Cluster
