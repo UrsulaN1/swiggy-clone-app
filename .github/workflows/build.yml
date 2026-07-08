@@ -10,6 +10,11 @@ jobs:
     name: Build and Deploy
     runs-on: ubuntu-latest
     
+    # ─── ADD THE PERMISSIONS BLOCK FOR OIDC ───
+    permissions:
+      id-token: write   # Required for requesting the JWT OIDC token from AWS
+      contents: read    # Required for actions/checkout to clone your repo
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
