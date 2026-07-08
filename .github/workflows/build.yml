@@ -54,7 +54,7 @@ jobs:
       # 4. Deployment to AWS EKS
       # UPDATED FOR OIDC: No raw Access Keys required anymore!
       - name: AWS Login via OIDC
-        uses: aws-actions/configure-aws-credentials@v6.1.0
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::<YOUR_AWS_ACCOUNT_ID>:role/GitHubActions-EKS-Deploy-Role
           aws-region: us-east-1

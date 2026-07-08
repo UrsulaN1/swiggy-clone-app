@@ -177,6 +177,7 @@ To keep your SonarQube and Docker Hub credentials secure, save them as Secrets i
 | **DOCKER_PASSWORD** | Paste the PAT token you copied from Docker Hub |
 | **AWS_ACCESS_KEY_ID** | Paste your AWS Access Key for your IAM user |
 | **AWS_SECRET_ACCESS_KEY** | Paste your AWS Secret Access Key for your IAM user |
+| **AWS_ACCOUNT_ID** | Paste your 12-digit ID |
 
 ### OR Use **OIDC** instead of AWS Credetials
 
