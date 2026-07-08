@@ -1,0 +1,73 @@
+name: Build and Deploy Swiggy Clone App
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Shallow clones disabled for better relevancy of analysis
+
+      # 1. SONARQUBE SCAN RUNS HERE FIRST
+      - name: SonarQube Scan
+        uses: sonarsource/sonarqube-scan-action@v3
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+      # 2. SECURITY SCAN RUNS NEXT
+      - name: Aqua Security Scan (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+
+      # 3. DOCKER BUILD & PUSH RUNS ONLY IF SCANS PASS
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push Docker images
+        uses: docker/build-push-action@v6.18.0
+        with:
+          context: .
+          push: true
+          tags: ursulan1/swiggy:latest
+
+      # 4. DEPLOYMENT TO AWS
+      # - name: AWS Login
+      #   uses: aws-actions/configure-aws-credentials@v6.1.0
+      #   with:
+      #     aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      #     aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      #     aws-region: us-east-1
+
+      # 4. Deployment to AWS EKS
+      # UPDATED FOR OIDC: No raw Access Keys required anymore!
+      - name: AWS Login via OIDC
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        with:
+          role-to-assume: arn:aws:iam::<YOUR_AWS_ACCOUNT_ID>:role/GitHubActions-EKS-Deploy-Role
+          aws-region: us-east-1
+
+      - name: Get EKS Credentials
+        run: |
+          aws eks update-kubeconfig --region us-east-1 --name swiggy-clone-app
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'latest'
+
+      - name: Deploy to EKS
+        run: |
+          kubectl apply -f deployment-and-service.yml
