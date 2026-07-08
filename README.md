@@ -1,10 +1,125 @@
-# Deploying the Swiggy-Clone-App with Terraform, Kubernetes and GitHub Actions
+# Secure DevSecOps CI/CD Pipeline (GitHub Actions) for the Swiggy Clone on Amazon EKS
 
-## PHASE 1: CONFIGURATION FILES
+---
 
-### STEP 1: Create an EC2 instance for Docker and SonarQube
+## Project Summary
 
-1. **main.tf**
+This repository contains the infrastructure configurations, security pipelines, and deployment manifests required to automatically provision, audit, and deploy a containerized Swiggy application clone into Amazon Elastic Kubernetes Service (EKS) via a secure, passwordless GitHub Actions workflow.
+
+## Architecture Delivery Flow Overview
+
+```mermaid
+flowchart LR
+    DEV[Developer] -->|git push / pull request| GH[GitHub Repository]
+    GH --> GA[GitHub Actions]
+
+    GA -->|Source analysis| SONAR[SonarQube Server or SonarQube Cloud]
+    GA -->|Filesystem and image scan| TRIVY[Trivy]
+    GA -->|Build and push SHA-tagged image| DH[Docker Hub]
+    GA -->|OIDC token| IAM[AWS IAM OIDC Provider]
+    IAM -->|Short-lived role credentials| GA
+    GA -->|kubectl apply| EKS[Amazon EKS]
+    EKS --> NODES[Managed Worker Nodes]
+    NODES --> PODS[Swiggy Application Pods]
+    DH -->|Pull image| PODS
+    EKS --> LB[AWS Load Balancer]
+    USER[Application User] -->|HTTP port 80| LB
+    LB -->|Target port 3000| PODS
+
+    TF[Terraform] --> EC2[Optional EC2 Tools Host]
+    EC2 --> SONAR
+```
+
+### <u> Infrastructure Provisioning</u>
+
+***```Terraform```*** deploys an AWS EC2 Management instance.
+
+### <u>  Cluster Creation</u>
+
+- eksctl configures a production-ready ***```Amazon EKS cluster```***  with managed Node Groups.
+
+### <u>  Identity Federation</u>
+
+- ***```OpenID Connect - OIDC```*** establishes short-lived cryptographic trust between ***```GitHub Actions```*** and ***```AWS IAM```***.
+
+### <u>  CI/CD Quality Gates</u>
+
+- Code pushes trigger ***```SonarQube```*** quality analysis and  ***```Aqua Security Trivy```*** vulnerability checks.
+
+### <u>  Continuous Deployment</u>
+
+- Successfully scanned container images are pushed to ***```Docker Hub```*** and automatically applied via ***Kubernetes manifests*** to EKS, spawning high-availability pods behind an automated ***```AWS Elastic Load Balancer```***.
+
+---
+
+## Repository Structure
+
+Organize the repository as follows:
+
+```text
+swiggy-clone-app/
+├── .github/
+│   └── workflows/
+│       └── build.yml
+├── infrastructure/
+│   ├── install.sh
+│   ├── main.tf
+│   ├── outputs.tf
+│   ├── provider.tf
+│   ├── terraform.tfvars.example
+│   ├── variables.tf
+│   └── versions.tf
+├── k8s/
+│   └── deployment-and-service.yml
+├── Dockerfile
+├── .dockerignore
+├── sonar-project.properties
+├── package.json
+├── package-lock.json
+└── README.md
+```
+
+## PHASE 0: DEFINE THE DEPLOYMENT VALUES
+
+Use the following values throughout the runbook. Replace them where required.
+
+| Setting | Example |
+| --- | --- |
+| AWS Region | `us-east-1` |
+| EKS Cluster | `swiggy-clone-app` |
+| Kubernetes Namespace | `swiggy` |
+| GitHub Owner | `Your-GitHub-UserName` |
+| GitHub Repository | `swiggy-clone-app` |
+| IAM Deployment Role | `GitHubActions-EKS-Deploy-Role` |
+| Docker Hub Repository | `ursulan1/swiggy-clone-app` |
+| SonarQube Project Key | `swiggy-clone-app` |
+| Application Port | `3000` |
+| Public Service Port | `80` |
+
+---
+
+## PHASE 1: PROVISION THE MANAGEMENT ENVIRONMENT (TERRAFORM)
+
+### STEP 1: Define the Configuration Files
+
+1. **provider.tf**
+
+```hcl
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.20.0" # Using '~>' is a best practice to allow minor patch updates
+    }
+  }
+}
+
+provider "aws" {
+  region = "us-east-1"
+}
+```
+
+2. **main.tf**
 
 ```hcl
 resource "aws_instance" "web" {
@@ -52,24 +167,7 @@ resource "aws_security_group" "github_action_vm_sg" {
 }
 ```
 
-2. **provider.tf**
-
-```hcl
-terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 6.20.0" # Using '~>' is a best practice to allow minor patch updates
-    }
-  }
-}
-
-provider "aws" {
-  region = "us-east-1"
-}
-```
-
-**install.sh:**
+3. **install.sh:**
 
 ```bash
 #!/bin/bash
@@ -78,12 +176,26 @@ sudo apt install fontconfig openjdk-21-jre -y
 java -version         
 ```
 
-### STEP 2: Clone the Code
+### STEP 2: Deploy the Infrastructure
 
-- Clone your application's code repository onto the EC2 instance:
+Initialize and apply the Terraform configuration state:
 
 ```bash
+terraform init
+terraform plan
+terraform apply --auto-approve
+```
+
+## PHASE 2: MANAGEMENT SERVER CONFIGURATION & LOCAL TOOLING
+
+Log into the newly created EC2 Instance via SSH to set up Docker, SonarQube, Trivy, and EKS CLI utilities.
+
+### STEP 1: Connect and Clone Application Context
+
+```bash
+# Clone directly on the remote host
 git clone https://github.com/UrsulaN1/swiggy-clone-app.git
+cd swiggy-clone-app
 ```
 
 - OR from your Windows terminal, copy project folder from your local machine to your EC2 instance:
@@ -92,54 +204,46 @@ git clone https://github.com/UrsulaN1/swiggy-clone-app.git
 scp -i "\path\to\newkey.pem" -r "\path\to\local\code-folder" ubuntu@<EC2_PUBLIC_IP>:/home/$USER
 ```
 
-### STEP 3: Install Docker and Run the App Using a Container
-
-- Set up Docker on the EC2 instance:
+### STEP 2: Install Docker Engine
 
 ```bash
 sudo apt-get update
 sudo apt-get install docker.io -y
-sudo usermod -aG docker $USER  # Replace with your system's username, e.g., 'ubuntu'
+sudo usermod -aG docker $USER
 newgrp docker
 ```
 
-## PPHASE 2: SECURITY
-
-### STEP 1. Install SonarQube and Trivy
-
-- Install SonarQube and Trivy on the EC2 instance to scan for vulnerabilities.
+### STEP 3: Deploy Security Engines (SonarQube & Trivy)
 
 ```bash
+# Run SonarQube community image
 docker run -d --name sonar -p 9000:9000 sonarqube:lts-community
-```
 
-**To access:**
-
-publicIP:9000 (by default username & password is admin)
-
-### STEP 2. Install Trivy
-
-```bash
+# Install Aqua Security Trivy via APT repository
 sudo apt-get install wget apt-transport-https gnupg lsb-release -y
-wget -qO- https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor | \ 
-sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
-echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" \
-| sudo tee /etc/apt/sources.list.d/trivy.list
+wget -qO- https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
 sudo apt-get update
-sudo apt-get install trivy -y        
+sudo apt-get install trivy -y
 ```
 
-**To scan image using trivy:**
+**SonarQube Web Access:**
+
+[http://publicIP:9000] (by default username & password is admin)
+
+Trivy Image Scan Test Command
 
 ```bash
 trivy image <imageid>
 ```
 
-### STEP 3: Integrate SonarQube with your GitHub Repository
+## PHASE 3: IDENTITY FEDERATION & COMPONENT SECURITY INTEGRATION
+
+Configure tokens, security trust stores, and credential structures across SonarQube, Docker Hub, AWS IAM, and your GitHub repository context.
+
+### STEP 1. Generate External Tooling Access Vectors
 
 **This allows SonarQube to automatically scan your code on every pull request or commit, and push the results (like code smells, bugs, and coverage) right back into your GitHub UI.**
-
-- It makes use of GitHub Actions
 
 #### <u> I. Create a GitHub Token in SonarQube</u>
 
@@ -246,89 +350,6 @@ This role must be explicitly scoped down so only your specific GitHub repository
 }
 ```
 
-#### OIDC 3: Update your build.yml File
-
-```yaml
-name: Build and Deploy Swiggy Clone App
-
-on:
-  push:
-    branches:
-      - main
-
-jobs:
-  build:
-    name: Build and Deploy
-    runs-on: ubuntu-latest
-    
-    # ─── ADD THE PERMISSIONS BLOCK FOR OIDC ───
-    permissions:
-      id-token: write   # Required for requesting the JWT OIDC token from AWS
-      contents: read    # Required for actions/checkout to clone your repo
-
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Shallow clones disabled for better relevancy of analysis
-
-      # 1. SONARQUBE SCAN RUNS HERE FIRST
-      - name: SonarQube Scan
-        uses: sonarsource/sonarqube-scan-action@v3
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-
-      # 2. SECURITY SCAN RUNS NEXT
-      - name: Aqua Security Scan (Trivy)
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-
-      # 3. DOCKER BUILD & PUSH RUNS ONLY IF SCANS PASS
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Build and push Docker images
-        uses: docker/build-push-action@v6.18.0
-        with:
-          context: .
-          push: true
-          tags: ursulan1/swiggy:latest
-
-      # 4. DEPLOYMENT TO AWS
-      # - name: AWS Login
-      #   uses: aws-actions/configure-aws-credentials@v6.1.0
-      #   with:
-      #     aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      #     aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      #     aws-region: us-east-1
-
-      # 4. Deployment to AWS EKS
-      # UPDATED FOR OIDC: No raw Access Keys required anymore!
-      - name: AWS Login via OIDC
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActions-EKS-Deploy-Role
-          aws-region: us-east-1
-
-      - name: Get EKS Credentials
-        run: |
-          aws eks update-kubeconfig --region us-east-1 --name swiggy-clone-app
-
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
-        with:
-          version: 'latest'
-
-      - name: Deploy to EKS
-        run: |
-          kubectl apply -f deployment-and-service.yml
-```
-
 #### <u> IV. Create a SonarQube Project</u>
 
 - In SonarQube, click Create Project (usually in the top right of the homepage).
@@ -336,30 +357,11 @@ jobs:
 - Give your project a Project key and Display name (e.g., swiggy-clone-app). Keep track of this key!
 - Set the main branch (e.g., main or master).
 
-#### <u>  V. Add the SonarQube Scan to GitHub Actions</u>
-
-**To automate code quality checks every time you push code or open a pull request.**
-
-- Now, create a workflow file in GitHub to run the scanner whenever code is pushed or a Pull Request is opened.
-- In your GitHub repository, create a new file at this exact path: .github/workflows/build.yml (see build.yml)
-
-### STEP 4: Run Git Commands
-
-```bash
-git init
-git add .
-git commit -m "Add first project files"
-git remote add origin https://github.com/<YOUR-GITHUB-REPO>.git
-git branch -M main
-git push -u origin main
-```
-
-## PHASE 3: CREATE EKS CLUSTER
+## PHASE 4: CREATE EKS CLUSTER
 
 ### STEP 1: install kubectl on EC2
 
 ```bash
-sudo apt update
 sudo apt install -y curl
 curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
 sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
@@ -379,7 +381,6 @@ aws --version
 # Configure global git parameters and clone repository
 git config --global user.name "Your.Name"
 git config --global user.email "your.email@gmail.com"
-git clone https://github.com/UrsulaN1/swiggy-clone-app.git
 ```
 
 ### STEP 3: Install  eksctl
@@ -451,7 +452,145 @@ kubectl get nodes
 kubectl get all
 ```
 
-## PHASE 4: ACCESS APPLICATION ONCE DEPLOYED
+## PHASE 5: PIPELINE & RUNTIME DEPLOYMENT MANIFESTS
+
+Commit these files to your application source tree repository root to manage declarative workload states.
+
+### STEP 1: Add the Deployment & Service Manifest File
+
+```deployment-and-service.yml```
+
+```YAML
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: swiggy-clone-app
+  labels:
+    app: swiggy-clone-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: swiggy-clone-app
+  template:
+    metadata:
+      labels:
+        app: swiggy-clone-app
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: swiggy-clone-app
+        image: ursulan1/swiggy:latest
+        imagePullPolicy: "Always"
+        ports:
+        - containerPort: 3000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: swiggy-clone-app
+  labels:
+    app: swiggy-clone-app
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 3000
+  selector:
+    app: swiggy-clone-app
+```
+
+### STEP 2: Add the CI/CD Pipeline Configuration File
+
+```.github/workflows/build.yml```
+
+```YAML
+name: Build and Deploy Swiggy Clone App
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md' # Avoid triggering deployment loops on doc changes
+
+jobs:
+  build:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+    
+    permissions:
+      id-token: write   
+      contents: read    
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  
+
+      - name: SonarQube Scan
+        uses: sonarsource/sonarqube-scan-action@v3
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+      - name: Aqua Security Scan (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push Docker images
+        uses: docker/build-push-action@v6.18.0
+        with:
+          context: .
+          push: true
+          tags: ursulan1/swiggy:latest
+
+      - name: AWS Login via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActions-EKS-Deploy-Role
+          aws-region: us-east-1
+
+      - name: Get EKS Credentials
+        run: |
+          aws eks update-kubeconfig --region us-east-1 --name swiggy-clone-app
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'latest'
+
+      - name: Deploy to EKS
+        run: |
+          kubectl apply -f deployment-and-service.yml
+```
+
+### STEP 3: Push Changes to Trigger Pipeline
+
+```bash
+git init
+git config --global user.name "Your Name"
+git config --global user.email "your.email@example.com"
+git add .
+git commit -m "feat: complete automated EKS OIDC delivery workflow"
+git remote add origin https://github.com/UrsulaN1/swiggy-clone-app.git
+git branch -M main
+git push -u origin main
+```
+
+```markdown
+> **Pro-Tip:** To push code documentation updates without triggering your automated workflows, append `[skip ci]` to your git commit message.
+```
+
+## PHASE 6: APPLICATION ROUTING VALIDATION
 
 ### What happens when you apply this manifest
 
@@ -483,9 +622,11 @@ Copy that URL, paste it into your web browser, and your live Swiggy Clone applic
 
 (Note: It can take 2–3 minutes for the AWS Load Balancer to finish provisioning and pass its health checks once the URL appears).
 
-## CLEANUP
+## CLEANUP AND RESOURCE TEARDOWN
 
-### STEP 1: Delete Kubernetes Resources
+To completely avoid unnecessary cloud provider costs, delete all provisioned components in the exact chronological sequence outlined below.
+
+### STEP 1: Delete Kubernetes Ingress Resources
 
 Before destroying the cluster, cleanly remove the deployed application and services.
 
