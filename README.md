@@ -228,9 +228,23 @@ This role must be explicitly scoped down so only your specific GitHub repository
 }
 ```
 
-- Click Next and attach the permissions required to manage your cluster (e.g., standard access matching what your old IAM User had, like EKS cluster read permissions).
-- Name the role something clear, like GitHubActions-EKS-Deploy-Role, and finalize creation.
-- Copy the Role ARN (it looks like arn:aws:iam::123456789012:role/GitHubActions-EKS-Deploy-Role).
+- Attach the following inline policy to the IAM role you just created:
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "eks:DescribeCluster",
+                "eks:ListClusters"
+            ],
+            "Resource": "arn:aws:eks:us-east-1:123456789012:cluster/swiggy-clone-app"
+        }
+    ]
+}
+```
 
 #### OIDC 3: Update your build.yml File
 
@@ -242,33 +256,36 @@ on:
     branches:
       - main
 
-# CRITICAL FOR OIDC: Allows the runner to request an authentication token from GitHub
-permissions:
-  id-token: write
-  contents: read
-
 jobs:
   build:
     name: Build and Deploy
     runs-on: ubuntu-latest
     
+    # ─── ADD THE PERMISSIONS BLOCK FOR OIDC ───
+    permissions:
+      id-token: write   # Required for requesting the JWT OIDC token from AWS
+      contents: read    # Required for actions/checkout to clone your repo
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0  # Shallow clones disabled for better relevancy of analysis
 
+      # 1. SONARQUBE SCAN RUNS HERE FIRST
       - name: SonarQube Scan
         uses: sonarsource/sonarqube-scan-action@v3
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
 
+      # 2. SECURITY SCAN RUNS NEXT
       - name: Aqua Security Scan (Trivy)
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'fs'
 
+      # 3. DOCKER BUILD & PUSH RUNS ONLY IF SCANS PASS
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
@@ -282,11 +299,20 @@ jobs:
           push: true
           tags: ursulan1/swiggy:latest
 
+      # 4. DEPLOYMENT TO AWS
+      # - name: AWS Login
+      #   uses: aws-actions/configure-aws-credentials@v6.1.0
+      #   with:
+      #     aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      #     aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      #     aws-region: us-east-1
+
+      # 4. Deployment to AWS EKS
       # UPDATED FOR OIDC: No raw Access Keys required anymore!
       - name: AWS Login via OIDC
-        uses: aws-actions/configure-aws-credentials@v6.1.0
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::<YOUR_AWS_ACCOUNT_ID>:role/GitHubActions-EKS-Deploy-Role
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActions-EKS-Deploy-Role
           aws-region: us-east-1
 
       - name: Get EKS Credentials
